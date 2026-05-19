@@ -147,6 +147,7 @@ def launch(
     human_preset: HumanPreset = "default",
     human_config: HumanConfigOverrides | None = None,
     extension_paths: list[str] | None = None,
+    license_key: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """Launch stealth Chromium browser. Returns a Playwright Browser object.
@@ -187,7 +188,7 @@ def launch(
 
     from playwright.sync_api import sync_playwright
 
-    binary_path = ensure_binary()
+    binary_path = ensure_binary(license_key=license_key)
     timezone, locale, exit_ip = maybe_resolve_geoip(geoip, proxy, timezone, locale)
     proxy_kwargs, proxy_extra_args = _resolve_proxy_config(proxy)
     args = _resolve_webrtc_args(args, proxy)
@@ -248,6 +249,7 @@ async def launch_async(  # noqa: C901
     human_preset: HumanPreset = "default",
     human_config: HumanConfigOverrides | None = None,
     extension_paths: list[str] | None = None,
+    license_key: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """Async version of launch(). Returns a Playwright Browser object.
@@ -286,7 +288,7 @@ async def launch_async(  # noqa: C901
 
     from playwright.async_api import async_playwright
 
-    binary_path = ensure_binary()
+    binary_path = ensure_binary(license_key=license_key)
     timezone, locale, exit_ip = maybe_resolve_geoip(geoip, proxy, timezone, locale)
     proxy_kwargs, proxy_extra_args = _resolve_proxy_config(proxy)
     args = _resolve_webrtc_args(args, proxy)
@@ -348,6 +350,7 @@ def launch_persistent_context(
     human_preset: HumanPreset = "default",
     human_config: HumanConfigOverrides | None = None,
     extension_paths: list[str] | None = None,
+    license_key: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """Launch stealth browser with a persistent profile and return a BrowserContext.
@@ -396,7 +399,7 @@ def launch_persistent_context(
 
     timezone = _resolve_timezone(timezone, kwargs)
 
-    binary_path = ensure_binary()
+    binary_path = ensure_binary(license_key=license_key)
     timezone, locale, exit_ip = maybe_resolve_geoip(geoip, proxy, timezone, locale)
     proxy_kwargs, proxy_extra_args = _resolve_proxy_config(proxy)
     args = _resolve_webrtc_args(args, proxy)
@@ -472,6 +475,7 @@ async def launch_persistent_context_async(
     human_preset: HumanPreset = "default",
     human_config: HumanConfigOverrides | None = None,
     extension_paths: list[str] | None = None,
+    license_key: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """Async version of launch_persistent_context().
@@ -522,7 +526,7 @@ async def launch_persistent_context_async(
 
     timezone = _resolve_timezone(timezone, kwargs)
 
-    binary_path = ensure_binary()
+    binary_path = ensure_binary(license_key=license_key)
     timezone, locale, exit_ip = maybe_resolve_geoip(geoip, proxy, timezone, locale)
     proxy_kwargs, proxy_extra_args = _resolve_proxy_config(proxy)
     args = _resolve_webrtc_args(args, proxy)
@@ -597,6 +601,7 @@ def launch_context(
     human_preset: HumanPreset = "default",
     human_config: HumanConfigOverrides | None = None,
     extension_paths: list[str] | None = None,
+    license_key: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """Launch stealth browser and return a BrowserContext with common options pre-set.
@@ -641,7 +646,8 @@ def launch_context(
     # so it applies to ALL contexts, not just the default one.
     # locale and timezone are set via binary flags only — no CDP emulation.
     browser = launch(headless=headless, proxy=proxy, args=args, stealth_args=stealth_args,
-                     timezone=timezone, locale=locale, extension_paths=extension_paths)
+                     timezone=timezone, locale=locale, extension_paths=extension_paths,
+                     license_key=license_key)
 
     context_kwargs: dict[str, Any] = {}
     if user_agent:
@@ -694,6 +700,7 @@ async def launch_context_async(
     human_preset: HumanPreset = "default",
     human_config: HumanConfigOverrides | None = None,
     extension_paths: list[str] | None = None,
+    license_key: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """Async version of launch_context().
@@ -757,7 +764,8 @@ async def launch_context_async(
     # so it applies to ALL contexts, not just the default one.
     # locale and timezone are set via binary flags only — no CDP emulation.
     browser = await launch_async(headless=headless, proxy=proxy, args=args, stealth_args=stealth_args,
-                                 timezone=timezone, locale=locale, extension_paths=extension_paths)
+                                 timezone=timezone, locale=locale, extension_paths=extension_paths,
+                                 license_key=license_key)
 
     context_kwargs: dict[str, Any] = {}
     if user_agent:

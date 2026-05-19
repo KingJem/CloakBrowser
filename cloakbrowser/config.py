@@ -134,15 +134,16 @@ def get_cache_dir() -> Path:
     return Path.home() / ".cloakbrowser"
 
 
-def get_binary_dir(version: str | None = None) -> Path:
+def get_binary_dir(version: str | None = None, pro: bool = False) -> Path:
     """Return the directory for a Chromium version binary."""
     v = version or get_chromium_version()
-    return get_cache_dir() / f"chromium-{v}"
+    suffix = "-pro" if pro else ""
+    return get_cache_dir() / f"chromium-{v}{suffix}"
 
 
-def get_binary_path(version: str | None = None) -> Path:
+def get_binary_path(version: str | None = None, pro: bool = False) -> Path:
     """Return the expected path to the chrome executable."""
-    binary_dir = get_binary_dir(version)
+    binary_dir = get_binary_dir(version, pro=pro)
 
     if platform.system() == "Darwin":
         # macOS: Chromium.app bundle
@@ -172,15 +173,30 @@ def check_platform_available() -> None:
         )
 
 
-def get_effective_version() -> str:
+def get_effective_version(pro: bool = False) -> str:
     """Return the best available version: auto-updated if available, else platform default.
 
     Reads a platform-scoped marker file from the cache directory.
     Returns the platform's hardcoded version if no update has been downloaded.
+    When pro=True, reads from the Pro-specific marker files.
     """
     base = get_chromium_version()
-    # Try platform-scoped marker first, fall back to legacy marker for upgrades from <0.3.0
     cache = get_cache_dir()
+
+    if pro:
+        marker = cache / f"latest_pro_version_{get_platform_tag()}"
+        if marker.exists():
+            try:
+                version = marker.read_text().strip()
+                if version:
+                    binary = get_binary_path(version, pro=True)
+                    if binary.exists():
+                        return version
+            except (ValueError, OSError):
+                pass
+        return base
+
+    # Free tier: try platform-scoped marker first, fall back to legacy marker
     for name in (f"latest_version_{get_platform_tag()}", "latest_version"):
         marker = cache / name
         if marker.exists():

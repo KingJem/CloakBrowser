@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import { binaryInfo } from "../src/download.js";
-import { DEFAULT_VIEWPORT, getChromiumVersion } from "../src/config.js";
+import { DEFAULT_VIEWPORT, getBinaryPath, getChromiumVersion, getPlatformTag } from "../src/config.js";
 import * as config from "../src/config.js";
 
 describe("binaryInfo", () => {
@@ -11,11 +13,47 @@ describe("binaryInfo", () => {
       const info = binaryInfo();
 
       expect(info.version).toBe(getChromiumVersion());
+      expect(info.bundledVersion).toBeTruthy();
       expect(info.platform).toMatch(/^(linux|darwin|windows)-(x64|arm64)$/);
       expect(info.binaryPath).toBeTruthy();
       expect(typeof info.installed).toBe("boolean");
       expect(info.cacheDir).toContain("cloakbrowser");
     } finally {
+      if (orig) process.env.CLOAKBROWSER_CACHE_DIR = orig;
+      else delete process.env.CLOAKBROWSER_CACHE_DIR;
+    }
+  });
+
+  it("reports tier from the installed binary, not a cached license", () => {
+    // A valid, fresh license is cached but NO Pro binary is on disk → free.
+    const orig = process.env.CLOAKBROWSER_CACHE_DIR;
+    const dir = `/tmp/cloakbrowser-test-${Date.now()}-tier`;
+    fs.mkdirSync(dir, { recursive: true });
+    process.env.CLOAKBROWSER_CACHE_DIR = dir;
+    try {
+      fs.writeFileSync(
+        path.join(dir, ".license_cache"),
+        JSON.stringify({
+          key_sha256: "abc",
+          valid: true,
+          plan: "solo",
+          expires: null,
+          validated_at: Date.now() / 1000,
+        })
+      );
+      expect(binaryInfo().tier).toBe("free");
+
+      // Now drop a Pro binary on disk → pro.
+      fs.writeFileSync(path.join(dir, `latest_pro_version_${getPlatformTag()}`), "147.0.5555.1");
+      const bp = getBinaryPath("147.0.5555.1", true);
+      fs.mkdirSync(path.dirname(bp), { recursive: true });
+      fs.writeFileSync(bp, "fake");
+      fs.chmodSync(bp, 0o755);
+      const info = binaryInfo();
+      expect(info.tier).toBe("pro");
+      expect(info.version).toBe("147.0.5555.1");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
       if (orig) process.env.CLOAKBROWSER_CACHE_DIR = orig;
       else delete process.env.CLOAKBROWSER_CACHE_DIR;
     }

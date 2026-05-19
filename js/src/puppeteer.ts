@@ -33,7 +33,7 @@ function resolveDefaultViewport(options: LaunchOptions): { width: number; height
 
 /** Resolve binary path, geoip, webrtc, and build final Chrome args. */
 async function resolveArgs(options: LaunchOptions): Promise<{ binaryPath: string; args: string[] }> {
-  const binaryPath = process.env.CLOAKBROWSER_BINARY_PATH || (await ensureBinary());
+  const binaryPath = process.env.CLOAKBROWSER_BINARY_PATH || (await ensureBinary(options.licenseKey));
   const { exitIp, ...resolved } = (await maybeResolveGeoip(options)) ?? {};
   let resolvedArgs = (await resolveWebrtcArgs(options)) ?? options.args;
 

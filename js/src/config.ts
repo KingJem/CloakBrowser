@@ -99,12 +99,13 @@ export function getCacheDir(): string {
   return path.join(os.homedir(), ".cloakbrowser");
 }
 
-export function getBinaryDir(version?: string): string {
-  return path.join(getCacheDir(), `chromium-${version || getChromiumVersion()}`);
+export function getBinaryDir(version?: string, pro = false): string {
+  const suffix = pro ? "-pro" : "";
+  return path.join(getCacheDir(), `chromium-${version || getChromiumVersion()}${suffix}`);
 }
 
-export function getBinaryPath(version?: string): string {
-  const binaryDir = getBinaryDir(version);
+export function getBinaryPath(version?: string, pro = false): string {
+  const binaryDir = getBinaryDir(version, pro);
   if (process.platform === "darwin") {
     return path.join(binaryDir, "Chromium.app", "Contents", "MacOS", "Chromium");
   }
@@ -158,10 +159,29 @@ export function getFallbackDownloadUrl(version?: string): string {
   return `${GITHUB_DOWNLOAD_BASE_URL}/chromium-v${v}/${getArchiveName()}`;
 }
 
-export function getEffectiveVersion(): string {
+export function getEffectiveVersion(pro = false): string {
   const base = getChromiumVersion();
   const cacheDir = getCacheDir();
-  // Try platform-scoped marker first, fall back to legacy marker for upgrades from <0.3.0
+
+  if (pro) {
+    const marker = path.join(cacheDir, `latest_pro_version_${getPlatformTag()}`);
+    try {
+      if (fs.existsSync(marker)) {
+        const version = fs.readFileSync(marker, "utf-8").trim();
+        if (version) {
+          const binary = getBinaryPath(version, true);
+          if (fs.existsSync(binary)) {
+            return version;
+          }
+        }
+      }
+    } catch {
+      // Marker unreadable
+    }
+    return base;
+  }
+
+  // Free tier: try platform-scoped marker first, fall back to legacy marker for upgrades from <0.3.0
   for (const name of [`latest_version_${getPlatformTag()}`, "latest_version"]) {
     const marker = path.join(cacheDir, name);
     try {

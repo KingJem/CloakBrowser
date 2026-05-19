@@ -21,8 +21,10 @@ from cloakbrowser.config import (
     get_platform_tag,
 )
 from cloakbrowser.download import (
+    BinaryVerificationError,
     _check_wrapper_update,
     _download_and_extract,
+    _download_pro_binary,
     _fetch_checksums,
     _fetch_signed_manifest,
     _get_latest_chromium_version,
@@ -31,6 +33,7 @@ from cloakbrowser.download import (
     _should_check_for_update,
     _verify_checksum,
     _verify_download_checksum,
+    _verify_pro_download,
     _verify_signature,
     _write_version_marker,
     check_for_update,
@@ -734,6 +737,121 @@ class TestVerifyDownloadChecksumSigned:
             with patch("cloakbrowser.download._fetch_signed_manifest") as mocked:
                 _verify_download_checksum(archive)  # skip honored, no raise
             mocked.assert_not_called()
+
+
+class TestVerifyProDownloadSigned:
+    """_verify_pro_download: Pro binaries get the SAME non-bypassable signature
+    check as the free official path (parity — closes the Pro M1 gap)."""
+
+    PRO_VERSION = "147.0.1.0"
+
+    def _hash(self, data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
+    def _tarball(self) -> str:
+        return get_download_url().rsplit("/", 1)[-1]
+
+    def _mock_fetch(self, manifest: bytes, sig: bytes):
+        """httpx.get stub: returns the .sig for *.sig URLs, manifest otherwise."""
+        def mock_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.content = sig if url.endswith(".sig") else manifest
+            return resp
+        return mock_get
+
+    def test_valid_pro_manifest_passes(self, tmp_path):
+        priv, pub_b64 = _make_key()
+        archive = tmp_path / "binary"
+        archive.write_bytes(b"the real pro binary")
+        manifest = (
+            f"version={self.PRO_VERSION}\n"
+            f"{self._hash(b'the real pro binary')}  {self._tarball()}\n"
+        ).encode()
+        sig = _sign(priv, manifest)
+        with patch("cloakbrowser.download.BINARY_SIGNING_PUBKEYS", [pub_b64]), \
+             patch("cloakbrowser.download.httpx.get", side_effect=self._mock_fetch(manifest, sig)):
+            _verify_pro_download(archive, self.PRO_VERSION)  # no raise
+
+    def test_skip_checksum_does_not_bypass(self, tmp_path):
+        """CLOAKBROWSER_SKIP_CHECKSUM must NOT weaken Pro verification (the point)."""
+        priv, pub_b64 = _make_key()
+        archive = tmp_path / "binary"
+        archive.write_bytes(b"a malicious pro binary")  # bytes differ from manifest
+        manifest = (
+            f"version={self.PRO_VERSION}\n"
+            f"{self._hash(b'the real pro binary')}  {self._tarball()}\n"
+        ).encode()
+        sig = _sign(priv, manifest)
+        with patch.dict(os.environ, {"CLOAKBROWSER_SKIP_CHECKSUM": "true"}), \
+             patch("cloakbrowser.download.BINARY_SIGNING_PUBKEYS", [pub_b64]), \
+             patch("cloakbrowser.download.httpx.get", side_effect=self._mock_fetch(manifest, sig)):
+            with pytest.raises(RuntimeError, match="Checksum verification failed"):
+                _verify_pro_download(archive, self.PRO_VERSION)
+
+    def test_missing_manifest_is_transient_not_tampering(self, tmp_path):
+        """A failed manifest FETCH is transient (router falls back to free), so it
+        must be a plain RuntimeError — NOT a BinaryVerificationError, which the
+        router re-raises as a hard failure."""
+        archive = tmp_path / "binary"
+        archive.write_bytes(b"x")
+        with patch("cloakbrowser.download.httpx.get", side_effect=Exception("404")):
+            with pytest.raises(RuntimeError) as ei:
+                _verify_pro_download(archive, self.PRO_VERSION)
+        assert not isinstance(ei.value, BinaryVerificationError)
+
+    def test_wrong_version_fails_downgrade(self, tmp_path):
+        """A genuinely-signed Pro manifest for a DIFFERENT version is rejected."""
+        priv, pub_b64 = _make_key()
+        archive = tmp_path / "binary"
+        archive.write_bytes(b"the real pro binary")
+        manifest = (
+            f"version=1.0.0.0\n"  # declares old version, we ask for PRO_VERSION
+            f"{self._hash(b'the real pro binary')}  {self._tarball()}\n"
+        ).encode()
+        sig = _sign(priv, manifest)
+        with patch("cloakbrowser.download.BINARY_SIGNING_PUBKEYS", [pub_b64]), \
+             patch("cloakbrowser.download.httpx.get", side_effect=self._mock_fetch(manifest, sig)):
+            with pytest.raises(RuntimeError, match="Version mismatch"):
+                _verify_pro_download(archive, self.PRO_VERSION)
+
+    def test_tampered_manifest_fails_signature(self, tmp_path):
+        """A manifest tampered after signing fails the signature gate (not the hash)."""
+        priv, pub_b64 = _make_key()
+        archive = tmp_path / "binary"
+        archive.write_bytes(b"the real pro binary")
+        manifest = (
+            f"version={self.PRO_VERSION}\n"
+            f"{self._hash(b'the real pro binary')}  {self._tarball()}\n"
+        ).encode()
+        sig = _sign(priv, manifest)
+        tampered = manifest.replace(self._tarball().encode(), b"evil.tar.gz")
+        with patch("cloakbrowser.download.BINARY_SIGNING_PUBKEYS", [pub_b64]), \
+             patch("cloakbrowser.download.httpx.get", side_effect=self._mock_fetch(tampered, sig)):
+            with pytest.raises(RuntimeError, match="signature verification failed"):
+                _verify_pro_download(archive, self.PRO_VERSION)
+
+
+class TestProDownloadVersionPinned:
+    """The Pro download must request the explicit version, NOT /latest, so the
+    served artifact matches the version-pinned signed manifest it's verified
+    against (no latest-advances TOCTOU)."""
+
+    def test_download_url_is_version_pinned(self):
+        from cloakbrowser.config import DOWNLOAD_BASE_URL
+
+        captured = {}
+
+        def fake_download_file(url, dest, headers=None):
+            captured["url"] = url
+
+        with patch("cloakbrowser.download._download_file", side_effect=fake_download_file), \
+             patch("cloakbrowser.download._verify_pro_download"), \
+             patch("cloakbrowser.download._extract_archive"):
+            _download_pro_binary("147.0.1.0", "cb_key")
+
+        assert captured["url"] == f"{DOWNLOAD_BASE_URL}/api/download/147.0.1.0"
+        assert not captured["url"].endswith("/latest")
 
 
 class TestVersionBinding:

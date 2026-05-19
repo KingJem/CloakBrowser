@@ -26,13 +26,16 @@ vi.mock("../src/config.js", async (importActual) => {
 });
 
 import {
+  BinaryVerificationError,
+  downloadProBinary,
   fetchSignedManifest,
   parseChecksums,
   parseManifestVersion,
   verifyDownloadChecksum,
+  verifyProDownload,
   verifySignature,
 } from "../src/download.js";
-import { getArchiveName, getChromiumVersion } from "../src/config.js";
+import { DOWNLOAD_BASE_URL, getArchiveName, getChromiumVersion } from "../src/config.js";
 
 /** Produce SHA256SUMS.sig content (base64 text bytes) for a manifest. */
 function sign(manifest: Uint8Array): Uint8Array {
@@ -170,6 +173,105 @@ describe("verifyDownloadChecksum (official path, fail-closed)", () => {
     const spy = vi.spyOn(globalThis, "fetch");
     await expect(verifyDownloadChecksum(file)).resolves.toBeUndefined();
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("downloadProBinary (version-pinned URL)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("requests the explicit version, not /latest", async () => {
+    let capturedUrl = "";
+    // First fetch is the binary download; capture its URL then abort the flow
+    // before verify/extract by returning a non-ok response.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      capturedUrl = typeof input === "string" ? input : (input as URL).toString();
+      return { ok: false, status: 500, statusText: "stop" } as Response;
+    });
+
+    await downloadProBinary("147.0.1.0", "cb_key").catch(() => {});
+
+    expect(capturedUrl).toBe(`${DOWNLOAD_BASE_URL}/api/download/147.0.1.0`);
+    expect(capturedUrl.endsWith("/latest")).toBe(false);
+  });
+});
+
+describe("verifyProDownload (Pro path, fail-closed parity)", () => {
+  const PRO_VERSION = "147.0.1.0";
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.CLOAKBROWSER_SKIP_CHECKSUM;
+  });
+
+  function tmpFile(bytes: Buffer): string {
+    const p = path.join(os.tmpdir(), `cloak-pro-${process.pid}-${bytes.length}-${bytes[0]}`);
+    fs.writeFileSync(p, bytes);
+    return p;
+  }
+
+  /** Mock fetch: serve `manifestBytes` for SHA256SUMS, its signature for *.sig. */
+  function mockManifest(manifestBytes: Uint8Array, sigBytes = sign(manifestBytes)) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : (input as URL).toString();
+      const out = url.endsWith(".sig") ? sigBytes : manifestBytes;
+      return { ok: true, arrayBuffer: async () => out.buffer } as Response;
+    });
+  }
+
+  const body = (lines: string, version = PRO_VERSION) =>
+    enc(`version=${version}\n${lines}`);
+
+  it("passes when signature is valid and hash matches", async () => {
+    const data = Buffer.from("the real pro binary");
+    const file = tmpFile(data);
+    const hash = createHash("sha256").update(data).digest("hex");
+    mockManifest(body(`${hash}  ${getArchiveName()}\n`));
+    await expect(verifyProDownload(file, PRO_VERSION)).resolves.toBeUndefined();
+  });
+
+  it("CLOAKBROWSER_SKIP_CHECKSUM does NOT bypass Pro verification", async () => {
+    const file = tmpFile(Buffer.from("a malicious pro binary"));
+    const goodHash = createHash("sha256").update(Buffer.from("the real pro binary")).digest("hex");
+    process.env.CLOAKBROWSER_SKIP_CHECKSUM = "true";
+    mockManifest(body(`${goodHash}  ${getArchiveName()}\n`));
+    const err = await verifyProDownload(file, PRO_VERSION).catch((e) => e);
+    // The error TYPE is the contract the ensureBinary router branches on:
+    // BinaryVerificationError => re-throw (never downgrade to free).
+    expect(err).toBeInstanceOf(BinaryVerificationError);
+    expect(err.message).toMatch(/Checksum verification failed/);
+  });
+
+  it("treats a failed manifest fetch as transient, not tampering", async () => {
+    // A failed manifest FETCH must be a plain Error (router falls back to free),
+    // NOT a BinaryVerificationError (which the router re-throws as a hard fail).
+    const file = tmpFile(Buffer.from("x"));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({ ok: false, status: 404 } as Response);
+    const err = await verifyProDownload(file, PRO_VERSION).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(BinaryVerificationError);
+  });
+
+  it("fails on a signed manifest for the wrong version (downgrade)", async () => {
+    const data = Buffer.from("the real pro binary");
+    const file = tmpFile(data);
+    const hash = createHash("sha256").update(data).digest("hex");
+    mockManifest(body(`${hash}  ${getArchiveName()}\n`, "1.0.0.0"));
+    const err = await verifyProDownload(file, PRO_VERSION).catch((e) => e);
+    expect(err).toBeInstanceOf(BinaryVerificationError);
+    expect(err.message).toMatch(/Version mismatch/);
+  });
+
+  it("rejects a manifest tampered after signing", async () => {
+    const data = Buffer.from("the real pro binary");
+    const file = tmpFile(data);
+    const hash = createHash("sha256").update(data).digest("hex");
+    const good = body(`${hash}  ${getArchiveName()}\n`);
+    const sig = sign(good);
+    const tampered = enc(new TextDecoder().decode(good).replace(getArchiveName(), "evil.tar.gz"));
+    mockManifest(tampered, sig);
+    const err = await verifyProDownload(file, PRO_VERSION).catch((e) => e);
+    expect(err).toBeInstanceOf(BinaryVerificationError);
+    expect(err.message).toMatch(/signature verification failed/);
   });
 });
 

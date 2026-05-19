@@ -102,7 +102,7 @@ export function buildContextOptions(
 export async function buildLaunchOptions(
   options: LaunchOptions = {}
 ): Promise<PlaywrightLaunchOptions> {
-  const binaryPath = process.env.CLOAKBROWSER_BINARY_PATH || (await ensureBinary());
+  const binaryPath = process.env.CLOAKBROWSER_BINARY_PATH || (await ensureBinary(options.licenseKey));
   const { exitIp, ...resolved } = await maybeResolveGeoip(options);
   const { proxyOption, proxyArgs } = resolveProxyConfig(options.proxy);
   let resolvedArgs = await resolveWebrtcArgs(options);
@@ -272,7 +272,7 @@ export async function launchPersistentContext(
   options = resolveTimezone(options);
   const { chromium } = await import("playwright-core");
 
-  const binaryPath = process.env.CLOAKBROWSER_BINARY_PATH || (await ensureBinary());
+  const binaryPath = process.env.CLOAKBROWSER_BINARY_PATH || (await ensureBinary(options.licenseKey));
   const { exitIp, ...resolved } = await maybeResolveGeoip(options);
   const { proxyOption, proxyArgs } = resolveProxyConfig(options.proxy);
   let resolvedArgs = await resolveWebrtcArgs(options);
