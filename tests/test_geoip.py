@@ -26,6 +26,15 @@ def test_resolve_literal_ipv4_with_auth():
     assert _resolve_proxy_ip("http://user:pass@10.50.96.5:8888") == "10.50.96.5"
 
 
+def test_resolve_bare_literal_ipv4_with_port():
+    """Bare proxy values must not be mistaken for a URL path."""
+    assert _resolve_proxy_ip("10.50.96.5:8888") == "10.50.96.5"
+
+
+def test_resolve_bare_literal_ipv4_with_auth():
+    assert _resolve_proxy_ip("user:pass@10.50.96.5:8888") == "10.50.96.5"
+
+
 def test_resolve_literal_ipv6():
     ip = _resolve_proxy_ip("http://[::1]:8888")
     assert ip == "::1"

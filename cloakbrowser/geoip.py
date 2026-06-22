@@ -115,9 +115,18 @@ def resolve_proxy_geo_with_ip(
 
 
 def _resolve_proxy_ip(proxy_url: str) -> str | None:
-    """Extract proxy hostname from URL and resolve to an IP address."""
+    """Extract a proxy host and resolve it to an IP address.
+
+    Accepts both URL-form proxies (``http://1.2.3.4:8080``) and the bare
+    ``host:port`` form accepted by the browser launch APIs.
+    """
     try:
-        hostname = urlparse(proxy_url).hostname
+        # Without ``//``, urlparse treats a bare ``1.2.3.4:8080`` as a path
+        # rather than a network location, so ``hostname`` is None.  Prefixing
+        # ``//`` preserves an existing scheme while correctly parsing bare
+        # host:port and user:password@host:port proxy forms.
+        parsed_url = proxy_url if "://" in proxy_url else f"//{proxy_url}"
+        hostname = urlparse(parsed_url).hostname
         if not hostname:
             return None
 
