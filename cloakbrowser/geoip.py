@@ -91,6 +91,8 @@ def resolve_proxy_geo_with_ip(
     if ip is None or _deadline_expired(deadline):
         if deadline is not None and _deadline_expired(deadline):
             logger.warning("GeoIP resolution timed out after %.1fs; continuing without GeoIP", timeout)
+        elif ip is None:
+            logger.warning("Failed to discover exit IP through proxy")
         return None, None, None
 
     try:
@@ -210,8 +212,11 @@ def resolve_proxy_exit_ip(proxy_url: str) -> str | None:
     timeout = _get_geoip_timeout_seconds()
     deadline = _deadline_from_timeout(timeout)
     ip = _resolve_exit_ip(proxy_url, timeout=timeout)
-    if ip is None and _deadline_expired(deadline):
-        logger.warning("GeoIP resolution timed out after %.1fs; continuing without GeoIP", timeout)
+    if ip is None:
+        if _deadline_expired(deadline):
+            logger.warning("GeoIP resolution timed out after %.1fs; continuing without GeoIP", timeout)
+        else:
+            logger.warning("Failed to discover exit IP through proxy")
     return ip
 
 
@@ -241,7 +246,6 @@ def _resolve_exit_ip(proxy_url: str, timeout: float | None = None) -> str | None
             return None
         except Exception:
             continue
-    logger.warning("Failed to discover exit IP through proxy")
     return None
 
 
